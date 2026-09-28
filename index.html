@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SIT — Sprint Interval Training</title>
+<style>
+  :root {
+    --bg: #14181f;
+    --panel: #1f2530;
+    --text: #eef1f6;
+    --muted: #8b93a3;
+    --accent: #4da3ff;
+    --sprint: #ff5c5c;
+    --rest: #4da3ff;
+    --prepare: #f4b942;
+    --done: #4caf50;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 24px 16px 60px;
+  }
+  h1 { margin: 0 0 4px; font-size: 1.6rem; }
+  p.subtitle { color: var(--muted); margin: 0 0 24px; text-align: center; }
+
+  .panel {
+    background: var(--panel);
+    border-radius: 12px;
+    padding: 20px;
+    width: 100%;
+    max-width: 480px;
+    margin-bottom: 20px;
+  }
+
+  .controls { display: grid; gap: 12px; }
+  .field { display: flex; flex-direction: column; gap: 4px; }
+  label { font-size: 0.85rem; color: var(--muted); }
+  select, input[type="number"] {
+    background: #0f131a;
+    border: 1px solid #333c4c;
+    color: var(--text);
+    border-radius: 8px;
+    padding: 10px;
+    font-size: 1rem;
+  }
+  .buttons { display: flex; gap: 12px; margin-top: 4px; }
+  button {
+    flex: 1;
+    padding: 12px;
+    border-radius: 8px;
+    border: none;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  #startBtn { background: var(--accent); color: #06111f; }
+  #stopBtn { background: #3a4152; color: var(--text); }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .display {
+    text-align: center;
+    transition: background 0.2s ease;
+  }
+  .display .phase-label {
+    font-size: 1.1rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+  .display .countdown {
+    font-size: 4.5rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+  }
+  .display .sub {
+    margin-top: 10px;
+    color: var(--muted);
+    font-size: 0.95rem;
+  }
+
+  body[data-phase="sprint"] .display .countdown { color: var(--sprint); }
+  body[data-phase="rest"] .display .countdown { color: var(--rest); }
+  body[data-phase="prepare"] .display .countdown { color: var(--prepare); }
+  body[data-phase="done"] .display .countdown { color: var(--done); }
+
+  table {
+    width: 100%;
+    max-width: 480px;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+  }
+  th, td {
+    padding: 6px 8px;
+    text-align: left;
+    border-bottom: 1px solid #2a3140;
+  }
+  th { color: var(--muted); font-weight: 600; }
+  tr.current-week td { color: var(--accent); }
+
+  footer { color: var(--muted); font-size: 0.8rem; margin-top: 24px; text-align: center; }
+</style>
+</head>
+<body data-phase="idle">
+  <h1>SIT — Sprint Interval Training</h1>
+  <p class="subtitle">10-week sprint protocol, timed with audible alarms.</p>
+
+  <div class="panel">
+    <div class="controls">
+      <div class="field">
+        <label for="weekSelect">Week</label>
+        <select id="weekSelect"></select>
+      </div>
+      <div class="field">
+        <label for="sprintsInput">Sprints (override, optional)</label>
+        <input type="number" id="sprintsInput" min="1" placeholder="use default">
+      </div>
+      <div class="field">
+        <label for="prepareInput">Get-ready buffer (seconds)</label>
+        <input type="number" id="prepareInput" min="0" value="15">
+      </div>
+      <div class="buttons">
+        <button id="startBtn">Start</button>
+        <button id="stopBtn" disabled>Stop</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel display">
+    <div class="phase-label" id="phaseLabel">Ready</div>
+    <div class="countdown" id="countdown">--:--</div>
+    <div class="sub" id="subLabel"></div>
+  </div>
+
+  <table id="scheduleTable">
+    <thead>
+      <tr>
+        <th>Week</th><th>Phase</th><th>Sprint</th><th>Rest/int</th>
+        <th>Total Rest</th><th>Sprints</th><th>Sessions/wk</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <footer>Alarms: 2 high beeps = sprint starts, 1 low beep = rest starts, 3 beeps = session complete.</footer>
+
+<script>
+// ---- Protocol data (see README.md) ----
+// Rest values are the *total* rest budget for the session; the actual rest
+// between sprints is that total split evenly across every sprint (rest also
+// follows the final sprint).
+const PROTOCOL = [
+  { week: 1, phase: "10-Second Sprints", sprintSeconds: 10, totalRest: 240, sprints: 4, sessionsPerWeek: 2 },
+  { week: 2, phase: "10-Second Sprints", sprintSeconds: 10, totalRest: 180, sprints: 6, sessionsPerWeek: 2 },
+  { week: 3, phase: "10-Second Sprints", sprintSeconds: 10, totalRest: 120, sprints: 8, sessionsPerWeek: 2 },
+  { week: 4, phase: "20-Second Sprints", sprintSeconds: 20, totalRest: 240, sprints: 4, sessionsPerWeek: 2 },
+  { week: 5, phase: "20-Second Sprints", sprintSeconds: 20, totalRest: 180, sprints: 6, sessionsPerWeek: 2 },
+  { week: 6, phase: "20-Second Sprints", sprintSeconds: 20, totalRest: 120, sprints: 8, sessionsPerWeek: 2 },
+  { week: 7, phase: "30-Second Sprints", sprintSeconds: 30, totalRest: 240, sprints: 4, sessionsPerWeek: 2 },
+  { week: 8, phase: "30-Second Sprints", sprintSeconds: 30, totalRest: 180, sprints: 4, sessionsPerWeek: 2 },
+  { week: 9, phase: "30-Second Sprints", sprintSeconds: 30, totalRest: 120, sprints: 4, sessionsPerWeek: 2 },
+  { week: 10, phase: "30-Second Sprints", sprintSeconds: 30, totalRest: 240, sprints: 4, sessionsPerWeek: 3 },
+];
+const MAINTENANCE = { week: 11, phase: "Maintenance", sprintSeconds: 30, totalRest: 240, sprints: 4, sessionsPerWeek: 3 };
+
+function getWeekPlan(week) {
+  return PROTOCOL.find((p) => p.week === week) || MAINTENANCE;
+}
+
+function restInterval(plan, sprintsOverride) {
+  const sprints = sprintsOverride || plan.sprints;
+  return Math.floor(plan.totalRest / sprints);
+}
+
+// ---- Audio (Web Audio API) ----
+let audioCtx = null;
+function ensureAudio() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (audioCtx.state === "suspended") audioCtx.resume();
+  return audioCtx;
+}
+
+function beep(freq, durationMs, startDelaySec = 0) {
+  const ctx = ensureAudio();
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = "sine";
+  osc.frequency.value = freq;
+  const start = ctx.currentTime + startDelaySec;
+  const dur = durationMs / 1000;
+  const attack = 0.01;
+  const release = Math.min(0.04, dur / 3);
+  // Hold at full volume between attack and release so the tail doesn't fade
+  // into the next beep's onset — otherwise back-to-back beeps blur together.
+  gain.gain.setValueAtTime(0, start);
+  gain.gain.linearRampToValueAtTime(0.4, start + attack);
+  gain.gain.setValueAtTime(0.4, start + dur - release);
+  gain.gain.linearRampToValueAtTime(0, start + dur);
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+  osc.start(start);
+  osc.stop(start + dur + 0.02);
+}
+
+function beepPattern(times, freq, durationMs, gapMs = 220) {
+  for (let i = 0; i < times; i++) {
+    beep(freq, durationMs, (i * (durationMs + gapMs)) / 1000);
+  }
+}
+
+function playTransitionSound(phaseType) {
+  if (phaseType === "SPRINT") beepPattern(2, 1000, 200);
+  else if (phaseType === "REST") beep(400, 500);
+  else if (phaseType === "DONE") beepPattern(3, 1200, 200);
+}
+
+// ---- Screen wake lock (best-effort) ----
+let wakeLock = null;
+async function requestWakeLock() {
+  try {
+    if ("wakeLock" in navigator) wakeLock = await navigator.wakeLock.request("screen");
+  } catch (e) {
+    // ignore — not critical to functionality
+  }
+}
+function releaseWakeLock() {
+  if (wakeLock) {
+    wakeLock.release();
+    wakeLock = null;
+  }
+}
+
+// ---- Session state machine ----
+const session = {
+  phases: [], idx: -1, phaseEndAt: 0, intervalId: null, running: false, lastBeepedIdx: -1,
+};
+
+function buildPhases(plan, sprintsOverride, prepareSeconds) {
+  const sprints = sprintsOverride || plan.sprints;
+  const rest = restInterval(plan, sprints);
+  const phases = [];
+  if (prepareSeconds > 0) {
+    phases.push({ type: "PREPARE", seconds: prepareSeconds, label: "Get ready", sub: "" });
+  }
+  for (let i = 1; i <= sprints; i++) {
+    phases.push({ type: "SPRINT", seconds: plan.sprintSeconds, label: "Sprint", sub: `${i} / ${sprints}` });
+    phases.push({ type: "REST", seconds: rest, label: "Rest", sub: `${i} / ${sprints}` });
+  }
+  phases.push({ type: "DONE", seconds: 0, label: "Session complete!", sub: "Nice work." });
+  return phases;
+}
+
+function formatTime(totalSeconds) {
+  const s = Math.max(0, Math.ceil(totalSeconds));
+  const m = Math.floor(s / 60);
+  const rem = s % 60;
+  return `${m}:${String(rem).padStart(2, "0")}`;
+}
+
+function displayPhase(phase, secondsLeft) {
+  document.getElementById("phaseLabel").textContent = phase.label;
+  document.getElementById("subLabel").textContent = phase.sub || "";
+  document.getElementById("countdown").textContent =
+    phase.type === "DONE" ? "\u2713" : formatTime(secondsLeft);
+  document.body.dataset.phase = phase.type.toLowerCase();
+}
+
+function advancePhase() {
+  session.idx++;
+  const phase = session.phases[session.idx];
+  if (!phase) {
+    finishSession();
+    return;
+  }
+  // Guard against playing the same transition twice, e.g. if a backgrounded
+  // tab causes the browser to fire more than one backlogged timer tick.
+  if (session.lastBeepedIdx !== session.idx) {
+    playTransitionSound(phase.type);
+    session.lastBeepedIdx = session.idx;
+  }
+  if (phase.type === "DONE") {
+    displayPhase(phase, 0);
+    finishSession();
+    return;
+  }
+  session.phaseEndAt = performance.now() + phase.seconds * 1000;
+  displayPhase(phase, phase.seconds);
+}
+
+let ticking = false;
+function tick() {
+  if (!session.running || ticking) return;
+  ticking = true;
+  try {
+    const phase = session.phases[session.idx];
+    const remainingMs = session.phaseEndAt - performance.now();
+    if (remainingMs <= 0) {
+      advancePhase();
+    } else {
+      displayPhase(phase, remainingMs / 1000);
+    }
+  } finally {
+    ticking = false;
+  }
+}
+
+function finishSession() {
+  session.running = false;
+  clearInterval(session.intervalId);
+  document.getElementById("startBtn").disabled = false;
+  document.getElementById("stopBtn").disabled = true;
+  releaseWakeLock();
+}
+
+function startSession() {
+  const week = parseInt(document.getElementById("weekSelect").value, 10);
+  const plan = getWeekPlan(week);
+  const sprintsRaw = document.getElementById("sprintsInput").value;
+  const sprintsOverride = sprintsRaw ? parseInt(sprintsRaw, 10) : null;
+  const prepareSeconds = parseInt(document.getElementById("prepareInput").value, 10) || 0;
+
+  ensureAudio(); // must resume within the click gesture for autoplay policies
+
+  session.phases = buildPhases(plan, sprintsOverride, prepareSeconds);
+  session.idx = -1;
+  session.lastBeepedIdx = -1;
+  session.running = true;
+  document.getElementById("startBtn").disabled = true;
+  document.getElementById("stopBtn").disabled = false;
+  requestWakeLock();
+  advancePhase();
+  session.intervalId = setInterval(tick, 200);
+}
+
+function stopSession() {
+  session.running = false;
+  clearInterval(session.intervalId);
+  document.getElementById("phaseLabel").textContent = "Stopped";
+  document.getElementById("subLabel").textContent = "";
+  document.getElementById("countdown").textContent = "--:--";
+  document.body.dataset.phase = "idle";
+  document.getElementById("startBtn").disabled = false;
+  document.getElementById("stopBtn").disabled = true;
+  releaseWakeLock();
+}
+
+document.getElementById("startBtn").addEventListener("click", startSession);
+document.getElementById("stopBtn").addEventListener("click", stopSession);
+
+// ---- Populate controls & schedule table ----
+function populateWeekSelect() {
+  const select = document.getElementById("weekSelect");
+  for (const plan of PROTOCOL) {
+    const opt = document.createElement("option");
+    opt.value = plan.week;
+    opt.textContent = `Week ${plan.week} — ${plan.phase}`;
+    select.appendChild(opt);
+  }
+  const opt = document.createElement("option");
+  opt.value = MAINTENANCE.week;
+  opt.textContent = "Week 11+ — Maintenance";
+  select.appendChild(opt);
+}
+
+function populateScheduleTable() {
+  const tbody = document.querySelector("#scheduleTable tbody");
+  for (const plan of [...PROTOCOL, MAINTENANCE]) {
+    const tr = document.createElement("tr");
+    const weekLabel = plan.week <= 10 ? String(plan.week) : "11+";
+    tr.innerHTML = `
+      <td>${weekLabel}</td>
+      <td>${plan.phase}</td>
+      <td>${plan.sprintSeconds}s</td>
+      <td>${restInterval(plan)}s</td>
+      <td>${plan.totalRest}s</td>
+      <td>${plan.sprints}</td>
+      <td>${plan.sessionsPerWeek}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+}
+
+populateWeekSelect();
+populateScheduleTable();
+</script>
+</body>
+</html>
